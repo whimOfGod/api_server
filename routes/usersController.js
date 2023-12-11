@@ -54,5 +54,38 @@ module.exports = {
         });
     },
     login: function(request, response){
+
+        // getting params
+        let email = request.body.email;
+        let password = request.body.password;
+
+        // verify params
+        if ( email == null || password == null ){
+            return response.status(400).mjson({'error': 'missing parameters'});
+        };
+
+        // TODO verify email regex & password lenght
+        models.User.findOne({
+            where: { email: email }
+        })
+        .then(function(userFound) {
+            if (userFound){
+                bcrypt.compare(password, userFound.password, function(errorBycript, responsesBycript){
+                    if (responsesBycript){
+                        return response.status(200).js({
+                            'userId': newUser.id,
+                            'token': 'THE TOKEN'
+                        });
+                    } else {
+                        return response.status(403).json({"error":"invalid password"});
+                    }
+                })
+            } else {
+                return response.status(404).json({'error':'user not exist in database'});
+            }
+        })
+        .catch( function(error) {
+            return response.status(500).json({'error':''})
+        })
     }
 }
