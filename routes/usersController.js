@@ -13,7 +13,7 @@ module.exports = {
         let password = request.body.password;
         let bio      = request.body.bio;
 
-        // verifiry fields and catch error 
+        // verifiry fields and catch error
         if( email == null || username == null || password == null || bio == null ){
             return response.status(400).json({ 'error': 'missing parameters'});
         };
@@ -25,31 +25,34 @@ module.exports = {
         })
         .then(function(userFound){
             if (!userFound){
-
                 bcrypt.hash(password, 5, function(errorHash, bcryptedPassword){
-                    let newUser = models.User.create({
+                    if(errorHash) {
+                        return response.status(500).json({'error': 'bcrypt error'});
+                    }
+                    models.User.create({
                         email: email,
                         username: username,
                         password: bcryptedPassword,
                         bio: bio,
                         isAdmin: 0,
                     })
-                    .then( function(newUser){
+                    .then(function(newUser){
                         return response.status(201).json({
                             'userId': newUser.id
-                        })
-                    .catch(function(error){
-                        return response.status(500).json({'error': 'cannot add user'})
                         });
+                    })
+                    .catch(function(error){
+                        return response.status(500).json({'error': 'cannot add user'});
                     });
                 });
-
             } else {
                 return response.status(409).json({'error': 'already exist'});
             }
         })
+        .catch(function(error){
+            return response.status(500).json({'error': 'database error'});
+        });
     },
     login: function(request, response){
-
     }
 }
