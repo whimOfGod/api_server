@@ -1,7 +1,11 @@
 // imports
 let bcrypt = require('bcrypt');
-let jwt = require('jsonwebtoken');
-let models = require('../models')
+let jwtUtils = require('../utils/jwt.utils');
+let models = require('../models');
+
+// variables
+const EMAIL_REGEX = /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+const PASSWORD_REGEX = /^(?=.*\d).{4,8}$/;
 
 // Routes
 module.exports = {
@@ -16,7 +20,20 @@ module.exports = {
         // verifiry fields and catch error
         if( email == null || username == null || password == null || bio == null ){
             return response.status(400).json({ 'error': 'missing parameters'});
-        };
+        }
+        
+        if (username.length >= 13 || username.length <= 4){
+            return response.status(400).json({ 'error': 'wrong username you (length must be 5-12)'});
+        }
+
+        if (!EMAIL_REGEX.test(email)){
+            return response.status(400).json({ 'error': 'this email is not valid ! '});
+        }
+
+        if (!PASSWORD_REGEX.test(password)){
+            return response.status(400).json({ 'error': 'the password must lenth 4 - 8 and include 1 number'});
+        }
+        ;
 
         // TODO verify pseudo length, mail regex, password etc
         models.User.findOne({
@@ -72,10 +89,10 @@ module.exports = {
             if (userFound){
                 bcrypt.compare(password, userFound.password, function(errorBycript, responsesBycript){
                     if (responsesBycript){
-                        return response.status(200).js({
-                            'userId': newUser.id,
-                            'token': 'THE TOKEN'
-                        });
+                        return response.status(200).json({
+                            'userId': userFound.id,
+                            'token': jwtUtils.generateTokenForUser(userFound)
+                        })
                     } else {
                         return response.status(403).json({"error":"invalid password"});
                     }
