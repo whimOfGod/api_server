@@ -2,6 +2,7 @@
 let bcrypt = require('bcrypt');
 let jwtUtils = require('../utils/jwt.utils');
 let models = require('../models');
+let asynclib = require('async');
 
 // variables
 const EMAIL_REGEX = /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
@@ -20,7 +21,7 @@ module.exports = {
         // verifiry fields and catch error
         if( email == null || username == null || password == null || bio == null ){
             return response.status(400).json({ 'error': 'missing parameters'});
-        }
+         }
         
         if (username.length >= 13 || username.length <= 4){
             return response.status(400).json({ 'error': 'wrong username you (length must be 5-12)'});
@@ -35,74 +36,124 @@ module.exports = {
         }
         ;
 
-        // TODO verify pseudo length, mail regex, password etc
-        models.User.findOne({
-            attributes:['email'],
-            where:{ email: email}
-        })
-        .then(function(userFound){
-            if (!userFound){
-                bcrypt.hash(password, 5, function(errorHash, bcryptedPassword){
-                    if(errorHash) {
-                        return response.status(500).json({'error': 'bcrypt error'});
-                    }
-                    models.User.create({
-                        email: email,
-                        username: username,
-                        password: bcryptedPassword,
-                        bio: bio,
-                        isAdmin: 0,
-                    })
-                    .then(function(newUser){
-                        return response.status(201).json({
-                            'userId': newUser.id
-                        });
-                    })
-                    .catch(function(error){
-                        return response.status(500).json({'error': 'cannot add user'});
-                    });
+        asynclib.waterfall([
+            function (done) {
+                models.User.findOne({
+                    attributes: ['email'],
+                    where: { email: email }
+                })
+                .then(function(userFound){
+                    done(null, userFound);
+                })
+                .catch(function(error){
+                    done(error);
                 });
-            } else {
-                return response.status(409).json({'error': 'already exist'});
+            },
+            function(userFound, done) {
+                if (!userFound) {
+                    bcrypt.hash(password, 5, function(error, bcryptedPassword){
+                        
+                        if (error) {
+                            done(error);
+                        } else {
+                            done(null, userFound, bcryptedPassword);
+                        }
+                    });
+                } else {
+                    return response.status(409).json({'error': 'already exist'});
+                }
+            },
+            function(userFound, bcryptedPassword, done) {
+                const newUser = models.User.create({
+                    email: email,
+                    username: username,
+                    password: bcryptedPassword,
+                    bio: bio,
+                    isAdmin: 0,
+                })
+                .then(function(newUser){
+                    done(newUser);
+                })
+                .catch(function(error){
+                    return response.status(500).json({'error':'cannot add user'});
+                });
             }
-        })
-        .catch(function(error){
-            return response.status(500).json({'error': 'database error'});
+        ],
+        function(error, newUser) {
+            if (error) {
+                return response.status(500).json({'error': error.message || 'cannot add user'});
+            } else {
+                return response.status(201).json({
+                    'userId': newUser.id
+                });
+            }
         });
     },
-    login: function(request, response){
 
-        // getting params
+    login: function(request, response) {
         let email = request.body.email;
         let password = request.body.password;
 
-        // verify params
-        if ( email == null || password == null ){
-            return response.status(400).mjson({'error': 'missing parameters'});
-        };
-
-        // TODO verify email regex & password lenght
-        models.User.findOne({
-            where: { email: email }
-        })
-        .then(function(userFound) {
-            if (userFound){
-                bcrypt.compare(password, userFound.password, function(errorBycript, responsesBycript){
-                    if (responsesBycript){
-                        return response.status(200).json({
-                            'userId': userFound.id,
-                            'token': jwtUtils.generateTokenForUser(userFound)
-                        })
-                    } else {
-                        return response.status(403).json({"error":"invalid password"});
-                    }
+        asynclib.waterfall([
+            function(done) {
+                models.User.findOne({
+                    where: { email: email }
                 })
-            } else {
-                return response.status(404).json({'error':'user not exist in database'});
+                .then(function(userFound) {
+                    done(null, userFound);
+                })
+                .catch(function(error) {
+                    done(error);
+                });
+            },
+            function(userFound, done) {
+                if (userFound) {
+                    bcrypt.compare(password, userFound.password, function(errorBycript, responsesBycript){
+                        if (errorBycript) {
+                            done(errorBycript);
+                        } else {
+                            done(null, userFound, responsesBycript);
+                        }
+                    });
+                } else {
+                    done(new Error('User not found'));
+                }
             }
-        })
-        .catch( function(error) {
-            return response.status(500).json({'error':''})
+        ],
+            function(error, userFound, responsesBycript) {
+                if (error) {
+                    return response.status(500).json({'error': error.message || 'unknown error'});
+                } else if (!responsesBycript) {
+                    return response.status(403).json({"error":"invalid password"});
+                } else {
+                    return response.status(200).json({
+                        'userId': userFound.id,
+                        'token': jwtUtils.generateTokenForUser(userFound)
+                    });
+                }
+        });
+    },
+
+    getUserProfile: function(request, response){
+        // Getting auth header
+        const headerAuth = req.headers['authorization'];
+        const userId     = jwtUtils.getUserId(headerAuth);
+
+        if ( userId <0 )
+        return response.status(201).json({'error':'wrong Token'});
+
+        models.Users.findOne({
+            attributes: ['id', 'email', 'username', 'bio'],
+            where: { id: userId }
+        }).then(function(user){
+            if (user) {
+                response.status(201).json(user)
+            } else {
+                response.status(404).json({'error':'user not found'}) ;              
+            }
+        }).catch(function(error){
+            response.status(500).json({'error':'cannot fetch'});
         })
     }
-}
+};
+
